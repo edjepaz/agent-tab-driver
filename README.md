@@ -77,6 +77,8 @@ operating rules, and the command protocol.
 |---|---|---|
 | `extension/` | MV3 browser extension | your computer |
 | `relay.py` | command relay (stdlib-only HTTP server) | your computer |
+| `relay-config.json` | your settings (host, port, token, allowlist) — gitignored, never committed | your computer |
+| `relay-config.example.json` | documented template for the config | — |
 | `start-relay.bat` / `start-relay.sh` | one-click relay starters | your computer |
 | `driver.py` | send-a-command helper for the agent | agent's machine |
 | `SKILL.md` | agent instructions (purpose, tooling, auth, rules) | agent's machine |
@@ -85,11 +87,12 @@ operating rules, and the command protocol.
 
 ## Status
 
-Working prototype (v0.5.0), proven end-to-end: an agent drove a real,
+Working prototype (v0.6.0), proven end-to-end: an agent drove a real,
 logged-in carrier account through the user's own browser and IP after the
-cloud browser got fraud-blocked. v0.5.0 adds an optional token-gated shell
+cloud browser got fraud-blocked. v0.5.0 added an optional token-gated shell
 endpoint (`POST /run`) so the agent can also run allowlisted shell commands
-on the user's computer. Not a product: no Web Store listing, no hosted
+on the user's computer; v0.6.0 adds `relay-config.json` so all relay settings
+live in one gitignored file. Not a product: no Web Store listing, no hosted
 pairing service — by design, it's a personal tool you run yourself.
 
 ## Contributing & donations

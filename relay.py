@@ -42,36 +42,83 @@ HEARTBEAT = {"at": 0.0, "version": None, "tab_url": None, "open_tabs": []}  # la
 # Anyone who can reach the port can queue browser commands.
 #
 # POST /run is different: it executes shell commands on your computer, so it
-# requires a token. Start the relay with --token (or set AGENT_TAB_DRIVER_TOKEN)
-# to enable it; without a token, /run answers 403. The caller sends the token
-# in the X-Auth-Token header. The allowlist below scopes which programs may be
-# invoked — it is operator scoping, not a sandbox: the token is the boundary.
+# requires a token. Set it via --token, AGENT_TAB_DRIVER_TOKEN, or the
+# "token" key in relay-config.json; without a token, /run answers 403. The
+# caller sends the token in the X-Auth-Token header. The allowlist scopes
+# which programs may be invoked — it is operator scoping, not a sandbox:
+# the token is the boundary.
 
-SHELL_TOKEN = os.environ.get("AGENT_TAB_DRIVER_TOKEN", "")
+# Parameters resolve in this order: CLI flags > environment variables >
+# relay-config.json (next to this file) > built-in defaults.
+# The config file is yours alone: it may hold your token, so it is gitignored
+# — copy relay-config.example.json to relay-config.json and edit it.
+
+SHELL_TOKEN = ""
 
 # Programs the agent may invoke via /run, matched against the first word of the
-# command (case-insensitive, extension stripped on Windows). Override with
-# --allow or AGENT_TAB_DRIVER_ALLOW="ls,cat,python". Default is read-only.
+# command (case-insensitive, extension stripped on Windows). Default is read-only.
 DEFAULT_ALLOW = {
     "echo", "pwd", "whoami", "hostname", "ls", "dir", "cat", "type", "more",
     "find", "findstr", "where", "which", "tree", "head", "tail", "wc", "stat",
 }
-RUN_ALLOW = set(
-    a.strip().lower() for a in
-    os.environ.get("AGENT_TAB_DRIVER_ALLOW", "").split(",") if a.strip()
-) or set(DEFAULT_ALLOW)
+RUN_ALLOW = set(DEFAULT_ALLOW)
+
+AUDIT_LOG = "relay-audit.log"  # relative paths resolve next to relay.py
 
 MAX_RUN_OUTPUT = 65536  # bytes kept per stream; the rest is truncated
 MAX_RUN_TIMEOUT = 120   # seconds; the caller may ask for less
 
 
+def load_config(path):
+    """Read relay-config.json; return {} when missing or unreadable."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            cfg = json.load(f)
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError) as e:
+        print(f"warning: ignoring unreadable config {path}: {e}")
+        return {}
+    if not isinstance(cfg, dict):
+        print(f"warning: ignoring config {path}: top level must be an object")
+        return {}
+    return cfg
+
+
+def resolve(name, args, cfg, env_name, default):
+    """CLI flag > environment variable > config file > default."""
+    val = getattr(args, name, None)
+    if val:
+        return val, "flag"
+    val = os.environ.get(env_name, "")
+    if val:
+        return val, "env"
+    val = cfg.get(name, "")
+    if val:
+        return val, "config"
+    return default, "default"
+
+
+def resolve_allow(args, cfg):
+    """Allowlist from --allow / env / config (list or comma string) / default."""
+    raw, src = resolve("allow", args, cfg, "AGENT_TAB_DRIVER_ALLOW", "")
+    if not raw:
+        return set(DEFAULT_ALLOW), "default"
+    if isinstance(raw, (list, tuple)):
+        items = raw
+    else:
+        items = str(raw).split(",")
+    return set(a.strip().lower() for a in items if str(a).strip()), src
+
+
 def audit(line):
-    """Log a shell invocation to the console and relay-audit.log."""
+    """Log a shell invocation to the console and the audit log file."""
     msg = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {line}"
     print(msg, flush=True)
     try:
         here = os.path.dirname(os.path.abspath(__file__))
-        with open(os.path.join(here, "relay-audit.log"), "a", encoding="utf-8") as f:
+        path = AUDIT_LOG if os.path.isabs(AUDIT_LOG) else os.path.join(here, AUDIT_LOG)
+        with open(path, "a", encoding="utf-8") as f:
             f.write(msg + "\n")
     except OSError:
         pass
@@ -88,7 +135,8 @@ def run_first_word(cmd):
 
 def check_run_auth(headers):
     if not SHELL_TOKEN:
-        return "shell endpoint disabled: restart the relay with --token or set AGENT_TAB_DRIVER_TOKEN"
+        return ("shell endpoint disabled: set a token via --token, "
+                "AGENT_TAB_DRIVER_TOKEN, or relay-config.json")
     presented = headers.get("X-Auth-Token", "")
     if not hmac.compare_digest(presented, SHELL_TOKEN):
         return "bad or missing X-Auth-Token"
@@ -228,26 +276,54 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     import argparse
+    here = os.path.dirname(os.path.abspath(__file__))
     ap = argparse.ArgumentParser()
-    ap.add_argument("--host", default="127.0.0.1",
+    ap.add_argument("--config", default=os.path.join(here, "relay-config.json"),
+                    help="JSON config file (default: relay-config.json next to relay.py)")
+    ap.add_argument("--host", default=None,
                     help="interface to bind (127.0.0.1, or your Tailscale IP to let the agent reach it)")
-    ap.add_argument("--port", type=int, default=8765)
-    ap.add_argument("--token", default="",
-                    help="enable POST /run (shell commands) with this token; "
-                         "or set AGENT_TAB_DRIVER_TOKEN. Without a token, /run is disabled.")
-    ap.add_argument("--allow", default="",
-                    help="comma-separated programs the agent may run via /run; "
-                         "or set AGENT_TAB_DRIVER_ALLOW. Default is a read-only set.")
+    ap.add_argument("--port", type=int, default=None)
+    ap.add_argument("--token", default=None,
+                    help="enable POST /run (shell commands) with this token")
+    ap.add_argument("--allow", default=None,
+                    help="comma-separated programs the agent may run via /run")
+    ap.add_argument("--audit-log", default=None,
+                    help="where to log shell invocations")
+    ap.add_argument("--print-config", action="store_true",
+                    help="print the resolved configuration (token masked) and exit")
     args = ap.parse_args()
-    if args.token:
-        SHELL_TOKEN = args.token
-    if args.allow:
-        RUN_ALLOW.clear()
-        RUN_ALLOW.update(a.strip().lower() for a in args.allow.split(",") if a.strip())
-    print(f"relay listening on http://{args.host}:{args.port}")
+
+    cfg = load_config(args.config)
+
+    host, host_src = resolve("host", args, cfg, "AGENT_TAB_DRIVER_HOST", "127.0.0.1")
+    port_raw, port_src = resolve("port", args, cfg, "AGENT_TAB_DRIVER_PORT", 8765)
+    try:
+        port = int(port_raw)
+    except (TypeError, ValueError):
+        print(f"warning: bad port {port_raw!r}, using 8765")
+        port, port_src = 8765, "default"
+    token, token_src = resolve("token", args, cfg, "AGENT_TAB_DRIVER_TOKEN", "")
+    RUN_ALLOW, allow_src = resolve_allow(args, cfg)
+    audit_raw, audit_src = resolve("audit_log", args, cfg, "AGENT_TAB_DRIVER_AUDIT_LOG", "relay-audit.log")
+    AUDIT_LOG = audit_raw
+
+    SHELL_TOKEN = token
+
+    if args.print_config:
+        print(json.dumps({
+            "config_file": args.config,
+            "host": {"value": host, "from": host_src},
+            "port": {"value": port, "from": port_src},
+            "token": {"value": "***" if token else "", "from": token_src},
+            "allow": {"value": sorted(RUN_ALLOW), "from": allow_src},
+            "audit_log": {"value": AUDIT_LOG, "from": audit_src},
+        }, indent=2))
+        raise SystemExit(0)
+
+    print(f"relay {RELAY_VERSION} listening on http://{host}:{port} (config: {args.config})")
     if SHELL_TOKEN:
-        print(f"POST /run enabled, allowlist: {', '.join(sorted(RUN_ALLOW))}")
-        print("Shell invocations are logged to the console and relay-audit.log")
+        print(f"POST /run enabled (token from {token_src}), allowlist: {', '.join(sorted(RUN_ALLOW))}")
+        print(f"Shell invocations are logged to the console and {AUDIT_LOG}")
     else:
-        print("POST /run disabled (no --token / AGENT_TAB_DRIVER_TOKEN)")
-    HTTPServer((args.host, args.port), Handler).serve_forever()
+        print("POST /run disabled (no token in flags, env, or config)")
+    HTTPServer((host, port), Handler).serve_forever()

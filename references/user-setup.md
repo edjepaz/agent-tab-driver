@@ -32,10 +32,14 @@ agent's machine --(Tailscale, TCP)--> relay.py on YOUR computer :8765
 ## Each time you want the agent to drive
 
 1. Make sure Tailscale is connected.
-2. Start the relay, bound to your Tailscale IP:
-   - Windows: double-click `start-relay.bat` (asks for your IP once, remembers it).
+2. Start the relay:
+   - Windows: double-click `start-relay.bat`.
    - Mac/Linux: `./start-relay.sh`.
-   - Or manually: `python3 relay.py --host 100.x.x.x` — keep the terminal open.
+   - Or manually: `python3 relay.py` (reads `relay-config.json`; flags like
+     `--host 100.x.x.x` override it).
+   On first run the starter scripts create `relay-config.json` for you —
+   they ask for your Tailscale IP and an optional shell token. All relay
+   settings live there; see [protocol.md](protocol.md#configuration).
    - **Shell access (optional):** if you want the agent to also run shell
      commands and read files on this computer, start the relay with a token:
      `python3 relay.py --host 100.x.x.x --token SOMETHING_ONLY_YOU_KNOW`

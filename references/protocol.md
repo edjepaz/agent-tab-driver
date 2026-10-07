@@ -2,6 +2,26 @@
 
 Base URL: `http://<tailscale-ip>:8765` (reached over the user's tailnet).
 
+## Configuration
+
+`relay.py` reads `relay-config.json` from its own folder on startup
+(override with `--config <path>`). Copy `relay-config.example.json` to
+`relay-config.json` and edit it — or let `start-relay.bat` / `start-relay.sh`
+create it on first run. Precedence: **CLI flags > environment variables >
+config file > built-in defaults**. `relay-config.json` is gitignored because
+it may hold your shell token.
+
+| key | env var | default | what |
+|---|---|---|---|
+| `host` | `AGENT_TAB_DRIVER_HOST` | `127.0.0.1` | interface to bind (your Tailscale IP for agent access) |
+| `port` | `AGENT_TAB_DRIVER_PORT` | `8765` | port to listen on |
+| `token` | `AGENT_TAB_DRIVER_TOKEN` | _(empty)_ | enables `POST /run`; empty disables it |
+| `allow` | `AGENT_TAB_DRIVER_ALLOW` | read-only set | programs the agent may run via `/run` (list or `"a,b,c"`) |
+| `audit_log` | `AGENT_TAB_DRIVER_AUDIT_LOG` | `relay-audit.log` | where shell invocations are logged |
+
+`python3 relay.py --print-config` prints the resolved configuration with the
+token masked — useful for debugging ("which value won?").
+
 ## Endpoints
 
 | method | path | body | returns |

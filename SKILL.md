@@ -26,6 +26,12 @@ The browser-driving endpoints have **no password** — they trust the tailnet. P
 2. `relay.py` running, bound to their Tailscale IP (`python3 relay.py --host 100.x.x.x`, or the `start-relay` script).
 3. The extension loaded unpacked in Chrome/Brave (`chrome://extensions` → Developer mode → Load unpacked → `extension/`) and enabled.
 
+Relay settings (bind IP, port, shell token, allowlist) live in
+`relay-config.json` next to `relay.py` on the user's computer — see
+`references/protocol.md#configuration`. If the user reports the relay
+misbehaving, ask them to run `python3 relay.py --print-config` and tell you
+the `from` fields (the token prints masked).
+
 The user starts/stops the relay when they want driving. Never ask them to expose the port beyond the tailnet.
 
 ## Shell access (optional, token-gated)

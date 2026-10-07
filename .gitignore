@@ -1,4 +1,5 @@
 __pycache__/
 *.pyc
+relay-config.json
 relay-host.txt
 *.log
