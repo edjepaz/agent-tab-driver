@@ -1,0 +1,20 @@
+{
+  "action": {
+    "default_title": "Agent Tab Driver"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "description": "Lets a local agent drive the active tab. Prototype only \u2014 load unpacked, never publish as-is.",
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "manifest_version": 3,
+  "name": "Agent Tab Driver (prototype)",
+  "permissions": [
+    "tabs",
+    "scripting",
+    "activeTab"
+  ],
+  "version": "0.3.0"
+}
