@@ -17,7 +17,7 @@ import os
 import shlex
 import subprocess
 import time
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 
@@ -144,6 +144,11 @@ def check_run_auth(headers):
 
 
 class Handler(BaseHTTPRequestHandler):
+    # Bound every socket read: a client that connects and then stalls
+    # (half-open tunnel, dropped packets) can't wedge the relay forever.
+    # ThreadingHTTPServer (below) means one slow request never blocks others.
+    timeout = 120
+
     def _send(self, code, obj):
         body = json.dumps(obj).encode()
         self.send_response(code)
@@ -271,7 +276,20 @@ class Handler(BaseHTTPRequestHandler):
             self._send(404, {"error": "unknown endpoint"})
 
     def log_message(self, fmt, *args):
-        print(f"{self.command} {self.path}")
+        elapsed = f" {time.time() - self._t0:.1f}s" if hasattr(self, "_t0") else ""
+        print(f"{self.command} {self.path}{elapsed}")
+
+    def handle_one_request(self):
+        self._t0 = time.time()
+        try:
+            super().handle_one_request()
+        except (ConnectionResetError, BrokenPipeError, TimeoutError, OSError) as e:
+            print(f"{self.command} {self.path} died: {type(e).__name__}")
+
+
+class RelayServer(ThreadingHTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
 
 
 if __name__ == "__main__":
@@ -326,4 +344,4 @@ if __name__ == "__main__":
         print(f"Shell invocations are logged to the console and {AUDIT_LOG}")
     else:
         print("POST /run disabled (no token in flags, env, or config)")
-    HTTPServer((host, port), Handler).serve_forever()
+    RelayServer((host, port), Handler).serve_forever()
